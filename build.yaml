@@ -1,0 +1,16 @@
+targets:
+  $default:
+    builders:
+      path_parsing:
+        generate_for:
+          - test/gen_test.dart
+
+builders:
+  path_parsing:
+    import: "package:path_parsing/builder.dart"
+    builder_factories: ["svgPath"]
+    build_extensions: {".dart": [".g.dart"]}
+    auto_apply: dependents
+    build_to: source
+    applies_builders: ["source_gen|combining_builder"]
+

@@ -34,6 +34,7 @@ analyzer:
   exclude:
     # for Travis - don't try to analyze the flutter repo
     - 'flutter/**'
+    - '.dart_tool/**'
 
 
 linter:
