@@ -1,0 +1,8 @@
+name: path_parsing_example
+
+dependencies:
+  path_parsing:
+    path: ../
+
+environment:
+  sdk: '>=2.10.0-56.0.dev <3.0.0'
