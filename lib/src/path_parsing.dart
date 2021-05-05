@@ -99,7 +99,7 @@ class SvgPathStringSource {
 
   SvgPathSegType _previousCommand;
   int _idx;
-  int _length;
+  final int _length;
 
   bool _isHtmlSpace(int character) {
     // Histogram from Apple's page load test combined with some ad hoc browsing
@@ -127,10 +127,14 @@ class SvgPathStringSource {
   /// Returns the code unit of the first non-space, or -1 if at end of string.
   int _skipOptionalSvgSpaces() {
     while (true) {
-      if (_idx >= _length) return -1;
+      if (_idx >= _length) {
+        return -1;
+      }
 
-      final c = _string.codeUnitAt(_idx);
-      if (!_isHtmlSpace(c)) return c;
+      final int c = _string.codeUnitAt(_idx);
+      if (!_isHtmlSpace(c)) {
+        return c;
+      }
 
       _idx++;
     }
@@ -138,7 +142,7 @@ class SvgPathStringSource {
 
   void _skipOptionalSvgSpacesOrDelimiter(
       [int delimiter = AsciiConstants.comma]) {
-    final c = _skipOptionalSvgSpaces();
+    final int c = _skipOptionalSvgSpaces();
     if (c == delimiter) {
       _idx++;
       _skipOptionalSvgSpaces();
@@ -183,7 +187,9 @@ class SvgPathStringSource {
   ///
   /// Returns -1 if at end of string.
   int _readCodeUnit() {
-    if (_idx >= _length) return -1;
+    if (_idx >= _length) {
+      return -1;
+    }
     return _string.codeUnitAt(_idx++);
   }
 
@@ -195,7 +201,7 @@ class SvgPathStringSource {
 
     // Read the sign.
     int sign = 1;
-    var c = _readCodeUnit();
+    int c = _readCodeUnit();
     if (c == AsciiConstants.plus) {
       c = _readCodeUnit();
     } else if (c == AsciiConstants.minus) {
