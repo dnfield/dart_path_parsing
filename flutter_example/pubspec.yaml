@@ -1,0 +1,16 @@
+name: flutter_example
+description: A new Flutter project.
+publish_to: 'none'
+
+environment:
+  sdk: ">=2.16.0-80.0.dev <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path_parsing:
+    path: ../
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

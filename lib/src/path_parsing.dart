@@ -1,4 +1,4 @@
-// This code has been "translated" largely from the Chromium/blink source
+// This code has been 'translated' largely from the Chromium/blink source
 // for SVG path parsing.
 // The following files can be cross referenced to the classes and methods here:
 //   * https://github.com/chromium/chromium/blob/master/third_party/blink/renderer/core/svg/svg_parser_utilities.cc
@@ -11,11 +11,9 @@
 //   * https://github.com/chromium/chromium/blob/master/third_party/blink/renderer/core/svg/svg_path_parser_test.cc
 
 import 'dart:math' as math show sqrt, max, pi, tan, sin, cos, pow, atan2;
+import 'dart:typed_data';
 
-import 'package:meta/meta.dart';
-import 'package:vector_math/vector_math.dart' show Matrix4;
-
-import './path_segment_type.dart';
+import 'path_segment_type.dart';
 
 /// Parse `svg`, emitting the segment data to `path`.
 void writeSvgPathDataToPath(String? svg, PathProxy path) {
@@ -42,49 +40,34 @@ abstract class PathProxy {
     double x3,
     double y3,
   );
+  void arcToPoint(
+    double x1,
+    double y1,
+    double r1,
+    double r2,
+    double angle,
+    bool largeArc,
+    bool clockwise,
+  );
   void close();
-}
-
-/// Provides a minimal implementation of a [Point] or [Offset].
-// Takes care of a few things Point doesn't, without requiring Flutter as dependency
-@immutable
-class _PathOffset {
-  const _PathOffset(this.dx, this.dy)
-      : assert(dx != null), // ignore: unnecessary_null_comparison
-        assert(dy != null); // ignore: unnecessary_null_comparison
-
-  static _PathOffset get zero => const _PathOffset(0.0, 0.0);
-  final double dx;
-  final double dy;
-
-  double get direction => math.atan2(dy, dx);
-
-  _PathOffset translate(double translateX, double translateY) =>
-      _PathOffset(dx + translateX, dy + translateY);
-
-  _PathOffset operator +(_PathOffset other) =>
-      _PathOffset(dx + other.dx, dy + other.dy);
-  _PathOffset operator -(_PathOffset other) =>
-      _PathOffset(dx - other.dx, dy - other.dy);
-
-  _PathOffset operator *(double operand) =>
-      _PathOffset(dx * operand, dy * operand);
-
-  @override
-  String toString() => 'PathOffset{$dx,$dy}';
-
-  @override
-  bool operator ==(Object other) {
-    return other is _PathOffset && other.dx == dx && other.dy == dy;
-  }
-
-  // TODO(dnfield): Use a real hashing function - but this should at least be better than the default.
-  @override
-  int get hashCode => (((17 * 23) ^ dx.hashCode) * 23) ^ dy.hashCode;
 }
 
 const double _twoPiFloat = math.pi * 2.0;
 const double _piOverTwoFloat = math.pi / 2.0;
+final Float64x2 _one = Float64x2.splat(1);
+final Float64x2 _oneOverThree = Float64x2.splat(1.0 / 3.0);
+final Float64x2 _two = Float64x2.splat(2);
+final Float64x2 _pointFive = Float64x2.splat(.5);
+
+extension Float64x2Extension on Float64x2 {
+  double get direction {
+    return math.atan2(y, x);
+  }
+
+  Float64x2 reciprocal() {
+    return _one / this;
+  }
+}
 
 class SvgPathStringSource {
   SvgPathStringSource(this._string)
@@ -178,15 +161,15 @@ class SvgPathStringSource {
   }
 
   bool _isValidRange(double x) =>
-     -double.maxFinite <= x && x <= double.maxFinite;
+      -double.maxFinite <= x && x <= double.maxFinite;
 
-  bool _isValidExponent(double x) =>
-     -37 <= x  && x <= 38;
+  bool _isValidExponent(double x) => -37 <= x && x <= 38;
 
   /// Reads a code unit and advances the index.
   ///
-  /// Returns -1 if at end of string.
+  /// Must not be called at end of string.
   int _readCodeUnit() {
+    // assert(_idx >= _length);
     if (_idx >= _length) {
       return -1;
     }
@@ -209,8 +192,8 @@ class SvgPathStringSource {
       c = _readCodeUnit();
     }
 
-    if ((c < AsciiConstants.number0 || c > AsciiConstants.number9)
-        && c != AsciiConstants.period) {
+    if ((c < AsciiConstants.number0 || c > AsciiConstants.number9) &&
+        c != AsciiConstants.period) {
       throw StateError('First character of a number must be one of [0-9+-.].');
     }
 
@@ -232,8 +215,7 @@ class SvgPathStringSource {
       c = _readCodeUnit();
 
       // There must be a least one digit following the .
-      if (c < AsciiConstants.number0 ||
-          c > AsciiConstants.number9)
+      if (c < AsciiConstants.number0 || c > AsciiConstants.number9)
         throw StateError('There must be at least one digit following the .');
 
       double frac = 1.0;
@@ -264,8 +246,7 @@ class SvgPathStringSource {
       }
 
       // There must be an exponent
-      if (c < AsciiConstants.number0 ||
-          c > AsciiConstants.number9)
+      if (c < AsciiConstants.number0 || c > AsciiConstants.number9)
         throw StateError('Missing exponent');
 
       double exponent = 0.0;
@@ -322,10 +303,13 @@ class SvgPathStringSource {
 
   bool get hasMoreData => _idx < _length;
 
-  Iterable<PathSegmentData> parseSegments() sync* {
+  // Iterable<PathSegmentData> parseSegments() sync* {
+  List<PathSegmentData> parseSegments() {
+    final List<PathSegmentData> data = <PathSegmentData>[];
     while (hasMoreData) {
-      yield parseSegment();
+      data.add(parseSegment());
     }
+    return data;
   }
 
   PathSegmentData parseSegment() {
@@ -358,12 +342,12 @@ class SvgPathStringSource {
     switch (segment.command) {
       case SvgPathSegType.cubicToRel:
       case SvgPathSegType.cubicToAbs:
-        segment.point1 = _PathOffset(_parseNumber(), _parseNumber());
+        segment.point1 = Float64x2(_parseNumber(), _parseNumber());
         continue cubic_smooth;
       case SvgPathSegType.smoothCubicToRel:
       cubic_smooth:
       case SvgPathSegType.smoothCubicToAbs:
-        segment.point2 = _PathOffset(_parseNumber(), _parseNumber());
+        segment.point2 = Float64x2(_parseNumber(), _parseNumber());
         continue quad_smooth;
       case SvgPathSegType.moveToRel:
       case SvgPathSegType.moveToAbs:
@@ -372,33 +356,31 @@ class SvgPathStringSource {
       case SvgPathSegType.smoothQuadToRel:
       quad_smooth:
       case SvgPathSegType.smoothQuadToAbs:
-        segment.targetPoint = _PathOffset(_parseNumber(), _parseNumber());
+        segment.targetPoint = Float64x2(_parseNumber(), _parseNumber());
         break;
       case SvgPathSegType.lineToHorizontalRel:
       case SvgPathSegType.lineToHorizontalAbs:
-        segment.targetPoint =
-            _PathOffset(_parseNumber(), segment.targetPoint.dy);
+        segment.targetPoint = Float64x2(_parseNumber(), segment.targetPoint.y);
         break;
       case SvgPathSegType.lineToVerticalRel:
       case SvgPathSegType.lineToVerticalAbs:
-        segment.targetPoint =
-            _PathOffset(segment.targetPoint.dx, _parseNumber());
+        segment.targetPoint = Float64x2(segment.targetPoint.x, _parseNumber());
         break;
       case SvgPathSegType.close:
         _skipOptionalSvgSpaces();
         break;
       case SvgPathSegType.quadToRel:
       case SvgPathSegType.quadToAbs:
-        segment.point1 = _PathOffset(_parseNumber(), _parseNumber());
-        segment.targetPoint = _PathOffset(_parseNumber(), _parseNumber());
+        segment.point1 = Float64x2(_parseNumber(), _parseNumber());
+        segment.targetPoint = Float64x2(_parseNumber(), _parseNumber());
         break;
       case SvgPathSegType.arcToRel:
       case SvgPathSegType.arcToAbs:
-        segment.point1 = _PathOffset(_parseNumber(), _parseNumber());
+        segment.point1 = Float64x2(_parseNumber(), _parseNumber());
         segment.arcAngle = _parseNumber();
         segment.arcLarge = _parseArcFlag();
         segment.arcSweep = _parseArcFlag();
-        segment.targetPoint = _PathOffset(_parseNumber(), _parseNumber());
+        segment.targetPoint = Float64x2(_parseNumber(), _parseNumber());
         break;
       case SvgPathSegType.unknown:
         throw StateError('Unknown segment command');
@@ -408,20 +390,13 @@ class SvgPathStringSource {
   }
 }
 
-class OffsetHelper {
-  static _PathOffset reflectedPoint(
-      _PathOffset reflectedIn, _PathOffset pointToReflect) {
-    return _PathOffset(2 * reflectedIn.dx - pointToReflect.dx,
-        2 * reflectedIn.dy - pointToReflect.dy);
-  }
+Float64x2 reflectedPoint(Float64x2 reflectedIn, Float64x2 pointToReflect) {
+  return _two * reflectedIn - pointToReflect;
+}
 
-  static const double _kOneOverThree = 1.0 / 3.0;
-
-  /// Blend the points with a ratio (1/3):(2/3).
-  static _PathOffset blendPoints(_PathOffset p1, _PathOffset p2) {
-    return _PathOffset((p1.dx + 2 * p2.dx) * _kOneOverThree,
-        (p1.dy + 2 * p2.dy) * _kOneOverThree);
-  }
+/// Blend the points with a ratio (1/3):(2/3).
+Float64x2 blendPoints(Float64x2 p1, Float64x2 p2) {
+  return (p1 + _two * p2) * _oneOverThree;
 }
 
 bool isCubicCommand(SvgPathSegType command) {
@@ -446,30 +421,17 @@ class PathSegmentData {
         arcSweep = false,
         arcLarge = false;
 
-  _PathOffset get arcRadii => point1;
+  Float64x2 get arcRadii => point1;
 
-  double get arcAngle => point2.dx;
-  set arcAngle(double angle) => point2 = _PathOffset(angle, point2.dy);
-
-  double get r1 => arcRadii.dx;
-  double get r2 => arcRadii.dy;
-
-  bool get largeArcFlag => arcLarge;
-  bool get sweepFlag => arcSweep;
-
-  double get x => targetPoint.dx;
-  double get y => targetPoint.dy;
-
-  double get x1 => point1.dx;
-  double get y1 => point1.dy;
-
-  double get x2 => point2.dx;
-  double get y2 => point2.dy;
+  double get arcAngle => point2.x;
+  set arcAngle(double angle) {
+    point2 = Float64x2(angle, point2.y);
+  }
 
   SvgPathSegType command;
-  _PathOffset targetPoint = _PathOffset.zero;
-  _PathOffset point1 = _PathOffset.zero;
-  _PathOffset point2 = _PathOffset.zero;
+  Float64x2 targetPoint = Float64x2.zero();
+  Float64x2 point1 = Float64x2.zero();
+  Float64x2 point2 = Float64x2.zero();
   bool arcSweep;
   bool arcLarge;
 
@@ -480,9 +442,9 @@ class PathSegmentData {
 }
 
 class SvgPathNormalizer {
-  _PathOffset _currentPoint = _PathOffset.zero;
-  _PathOffset _subPathPoint = _PathOffset.zero;
-  _PathOffset _controlPoint = _PathOffset.zero;
+  Float64x2 _currentPoint = Float64x2.zero();
+  Float64x2 _subPathPoint = Float64x2.zero();
+  Float64x2 _controlPoint = Float64x2.zero();
   SvgPathSegType _lastCommand = SvgPathSegType.unknown;
 
   void emitSegment(PathSegmentData segment, PathProxy path) {
@@ -511,12 +473,10 @@ class SvgPathNormalizer {
         normSeg.targetPoint += _currentPoint;
         break;
       case SvgPathSegType.lineToHorizontalAbs:
-        normSeg.targetPoint =
-            _PathOffset(normSeg.targetPoint.dx, _currentPoint.dy);
+        normSeg.targetPoint = Float64x2(normSeg.targetPoint.x, _currentPoint.y);
         break;
       case SvgPathSegType.lineToVerticalAbs:
-        normSeg.targetPoint =
-            _PathOffset(_currentPoint.dx, normSeg.targetPoint.dy);
+        normSeg.targetPoint = Float64x2(_currentPoint.x, normSeg.targetPoint.y);
         break;
       case SvgPathSegType.close:
         // Reset m_currentPoint for the next path.
@@ -532,8 +492,7 @@ class SvgPathNormalizer {
       case SvgPathSegType.moveToRel:
       case SvgPathSegType.moveToAbs:
         _subPathPoint = normSeg.targetPoint;
-        // normSeg.command = SvgPathSegType.moveToAbs;
-        path.moveTo(normSeg.targetPoint.dx, normSeg.targetPoint.dy);
+        path.moveTo(normSeg.targetPoint.x, normSeg.targetPoint.y);
         break;
       case SvgPathSegType.lineToRel:
       case SvgPathSegType.lineToAbs:
@@ -541,11 +500,9 @@ class SvgPathNormalizer {
       case SvgPathSegType.lineToHorizontalAbs:
       case SvgPathSegType.lineToVerticalRel:
       case SvgPathSegType.lineToVerticalAbs:
-        // normSeg.command = SvgPathSegType.lineToAbs;
-        path.lineTo(normSeg.targetPoint.dx, normSeg.targetPoint.dy);
+        path.lineTo(normSeg.targetPoint.x, normSeg.targetPoint.y);
         break;
       case SvgPathSegType.close:
-        // normSeg.command = SvgPathSegType.close;
         path.close();
         break;
       case SvgPathSegType.smoothCubicToRel:
@@ -553,7 +510,7 @@ class SvgPathNormalizer {
         if (!isCubicCommand(_lastCommand)) {
           normSeg.point1 = _currentPoint;
         } else {
-          normSeg.point1 = OffsetHelper.reflectedPoint(
+          normSeg.point1 = reflectedPoint(
             _currentPoint,
             _controlPoint,
           );
@@ -563,14 +520,13 @@ class SvgPathNormalizer {
       cubic_abs2:
       case SvgPathSegType.cubicToAbs:
         _controlPoint = normSeg.point2;
-        // normSeg.command = SvgPathSegType.cubicToAbs;
         path.cubicTo(
-          normSeg.point1.dx,
-          normSeg.point1.dy,
-          normSeg.point2.dx,
-          normSeg.point2.dy,
-          normSeg.targetPoint.dx,
-          normSeg.targetPoint.dy,
+          normSeg.point1.x,
+          normSeg.point1.y,
+          normSeg.point2.x,
+          normSeg.point2.y,
+          normSeg.targetPoint.x,
+          normSeg.targetPoint.y,
         );
         break;
       case SvgPathSegType.smoothQuadToRel:
@@ -578,7 +534,7 @@ class SvgPathNormalizer {
         if (!isQuadraticCommand(_lastCommand)) {
           normSeg.point1 = _currentPoint;
         } else {
-          normSeg.point1 = OffsetHelper.reflectedPoint(
+          normSeg.point1 = reflectedPoint(
             _currentPoint,
             _controlPoint,
           );
@@ -589,33 +545,31 @@ class SvgPathNormalizer {
       case SvgPathSegType.quadToAbs:
         // Save the unmodified control point.
         _controlPoint = normSeg.point1;
-        normSeg.point1 = OffsetHelper.blendPoints(_currentPoint, _controlPoint);
-        normSeg.point2 = OffsetHelper.blendPoints(
+        normSeg.point1 = blendPoints(_currentPoint, _controlPoint);
+        normSeg.point2 = blendPoints(
           normSeg.targetPoint,
           _controlPoint,
         );
-        // normSeg.command = SvgPathSegType.cubicToAbs;
         path.cubicTo(
-          normSeg.point1.dx,
-          normSeg.point1.dy,
-          normSeg.point2.dx,
-          normSeg.point2.dy,
-          normSeg.targetPoint.dx,
-          normSeg.targetPoint.dy,
+          normSeg.point1.x,
+          normSeg.point1.y,
+          normSeg.point2.x,
+          normSeg.point2.y,
+          normSeg.targetPoint.x,
+          normSeg.targetPoint.y,
         );
         break;
       case SvgPathSegType.arcToRel:
       case SvgPathSegType.arcToAbs:
-        if (!_decomposeArcToCubic(_currentPoint, normSeg, path)) {
-          // On failure, emit a line segment to the target point.
-          // normSeg.command = SvgPathSegType.lineToAbs;
-          path.lineTo(normSeg.targetPoint.dx, normSeg.targetPoint.dy);
-          // } else {
-          //   // decomposeArcToCubic() has already emitted the normalized
-          //   // segments, so set command to PathSegArcAbs, to skip any further
-          //   // emit.
-          //   // normSeg.command = SvgPathSegType.arcToAbs;
-        }
+        path.arcToPoint(
+          normSeg.targetPoint.x,
+          normSeg.targetPoint.y,
+          normSeg.arcRadii.x,
+          normSeg.arcRadii.y,
+          normSeg.arcAngle,
+          normSeg.arcLarge,
+          normSeg.arcSweep,
+        );
         break;
       default:
         throw StateError('Invalid command type in path');
@@ -631,21 +585,20 @@ class SvgPathNormalizer {
     _lastCommand = segment.command;
   }
 
-// This works by converting the SVG arc to "simple" beziers.
+// This works by converting the SVG arc to 'simple' beziers.
 // Partly adapted from Niko's code in kdelibs/kdecore/svgicons.
 // See also SVG implementation notes:
 // http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
   bool _decomposeArcToCubic(
-    _PathOffset currentPoint,
+    Float64x2 currentPoint,
     PathSegmentData arcSegment,
     PathProxy path,
   ) {
     // If rx = 0 or ry = 0 then this arc is treated as a straight line segment (a
-    // "lineto") joining the endpoints.
+    // 'lineto') joining the endpoints.
     // http://www.w3.org/TR/SVG/implnote.html#ArcOutOfRangeParameters
-    double rx = arcSegment.arcRadii.dx.abs();
-    double ry = arcSegment.arcRadii.dy.abs();
-    if (rx == 0 || ry == 0) {
+    Float64x2 absArc = arcSegment.arcRadii.abs();
+    if (absArc.x == 0 || absArc.y == 0) {
       return false;
     }
 
@@ -657,46 +610,39 @@ class SvgPathNormalizer {
 
     final double angle = arcSegment.arcAngle;
 
-    final _PathOffset midPointDistance =
-        (currentPoint - arcSegment.targetPoint) * 0.5;
+    final Float64x2 midPointDistance =
+        (currentPoint - arcSegment.targetPoint) * _pointFive;
 
-    final Matrix4 pointTransform = Matrix4.identity();
-    pointTransform.rotateZ(-angle);
+    final _AffineMatrix pointTransform = _AffineMatrix();
+    pointTransform.rotate(-angle);
 
-    final _PathOffset transformedMidPoint = _mapPoint(
-      pointTransform,
-      _PathOffset(
-        midPointDistance.dx,
-        midPointDistance.dy,
-      ),
-    );
+    final Float64x2 transformedMidPoint =
+        pointTransform.mapPoint(midPointDistance);
 
-    final double squareRx = rx * rx;
-    final double squareRy = ry * ry;
-    final double squareX = transformedMidPoint.dx * transformedMidPoint.dx;
-    final double squareY = transformedMidPoint.dy * transformedMidPoint.dy;
+    final Float64x2 squaredArc = absArc * absArc;
+    final Float64x2 squaredMidPoint = transformedMidPoint * transformedMidPoint;
 
     // Check if the radii are big enough to draw the arc, scale radii if not.
     // http://www.w3.org/TR/SVG/implnote.html#ArcCorrectionOutOfRangeRadii
-    final double radiiScale = squareX / squareRx + squareY / squareRy;
+    final Float64x2 scaledPoints = squaredMidPoint / squaredArc;
+    final double radiiScale = scaledPoints.x + scaledPoints.y;
     if (radiiScale > 1.0) {
-      rx *= math.sqrt(radiiScale);
-      ry *= math.sqrt(radiiScale);
+      absArc = absArc * Float64x2.splat(math.sqrt(radiiScale));
     }
-    pointTransform.setIdentity();
+    pointTransform.reset();
+    pointTransform.scale(absArc.reciprocal());
+    pointTransform.rotate(-angle);
 
-    pointTransform.scale(1.0 / rx, 1.0 / ry);
-    pointTransform.rotateZ(-angle);
+    Float64x2 point1 = pointTransform.mapPoint(currentPoint);
+    Float64x2 point2 = pointTransform.mapPoint(arcSegment.targetPoint);
 
-    _PathOffset point1 = _mapPoint(pointTransform, currentPoint);
-    _PathOffset point2 = _mapPoint(pointTransform, arcSegment.targetPoint);
-    _PathOffset delta = point2 - point1;
+    Float64x2 delta = point2 - point1;
 
-    final double d = delta.dx * delta.dx + delta.dy * delta.dy;
+    final double d = delta.x * delta.x + delta.y * delta.y;
     final double scaleFactorSquared = math.max(1.0 / d - 0.25, 0.0);
-    double scaleFactor = math.sqrt(scaleFactorSquared);
-    if (!scaleFactor.isFinite) {
-      scaleFactor = 0.0;
+    Float64x2 scaleFactor = Float64x2.splat(math.sqrt(scaleFactorSquared));
+    if (!scaleFactor.x.isFinite) {
+      scaleFactor = Float64x2.zero();
     }
 
     if (arcSegment.arcSweep == arcSegment.arcLarge) {
@@ -704,12 +650,10 @@ class SvgPathNormalizer {
     }
 
     delta = delta * scaleFactor;
-    final _PathOffset centerPoint =
-        ((point1 + point2) * 0.5).translate(-delta.dy, delta.dx);
-
+    final Float64x2 centerPoint =
+        ((point1 + point2) * _pointFive) + Float64x2(-delta.y, delta.x);
     final double theta1 = (point1 - centerPoint).direction;
     final double theta2 = (point2 - centerPoint).direction;
-
     double thetaArc = theta2 - theta1;
 
     if (thetaArc < 0.0 && arcSegment.arcSweep) {
@@ -717,16 +661,15 @@ class SvgPathNormalizer {
     } else if (thetaArc > 0.0 && !arcSegment.arcSweep) {
       thetaArc -= _twoPiFloat;
     }
-
-    pointTransform.setIdentity();
-    pointTransform.rotateZ(angle);
-    pointTransform.scale(rx, ry);
+    pointTransform.reset();
+    pointTransform.rotate(angle);
+    pointTransform.scale(absArc);
 
     // Some results of atan2 on some platform implementations are not exact
     // enough. So that we get more cubic curves than expected here. Adding 0.001f
     // reduces the count of segments to the correct count.
     final int segments = (thetaArc / (_piOverTwoFloat + 0.001)).abs().ceil();
-    for (int i = 0; i < segments; ++i) {
+    for (int i = 0; i < segments; i += 1) {
       final double startTheta = theta1 + i * thetaArc / segments;
       final double endTheta = theta1 + (i + 1) * thetaArc / segments;
 
@@ -739,38 +682,82 @@ class SvgPathNormalizer {
       final double sinEndTheta = math.sin(endTheta);
       final double cosEndTheta = math.cos(endTheta);
 
-      point1 = _PathOffset(
-        cosStartTheta - t * sinStartTheta,
-        sinStartTheta + t * cosStartTheta,
-      ).translate(centerPoint.dx, centerPoint.dy);
-      final _PathOffset targetPoint = _PathOffset(
-        cosEndTheta,
-        sinEndTheta,
-      ).translate(centerPoint.dx, centerPoint.dy);
-      point2 = targetPoint.translate(t * sinEndTheta, -t * cosEndTheta);
+      point1 = Float64x2(cosStartTheta - t * sinStartTheta,
+              sinStartTheta + t * cosStartTheta) +
+          centerPoint;
+      Float64x2 targetPoint = Float64x2(cosEndTheta, sinEndTheta) + centerPoint;
+      point2 = targetPoint + Float64x2(t * sinEndTheta, -t * cosEndTheta);
 
-      final PathSegmentData cubicSegment = PathSegmentData();
-      cubicSegment.command = SvgPathSegType.cubicToAbs;
-      cubicSegment.point1 = _mapPoint(pointTransform, point1);
-      cubicSegment.point2 = _mapPoint(pointTransform, point2);
-      cubicSegment.targetPoint = _mapPoint(pointTransform, targetPoint);
+      point1 = pointTransform.mapPoint(point1);
+      point2 = pointTransform.mapPoint(point2);
+      targetPoint = pointTransform.mapPoint(targetPoint);
 
-      path.cubicTo(cubicSegment.x1, cubicSegment.y1, cubicSegment.x2,
-          cubicSegment.y2, cubicSegment.x, cubicSegment.y);
-      //consumer_->EmitSegment(cubicSegment);
+      path.cubicTo(
+        point1.x,
+        point1.y,
+        point2.x,
+        point2.y,
+        targetPoint.x,
+        targetPoint.y,
+      );
     }
     return true;
   }
+}
 
-  _PathOffset _mapPoint(Matrix4 transform, _PathOffset point) {
-    // a, b, 0.0, 0.0, c, d, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, e, f, 0.0, 1.0
-    return _PathOffset(
-      transform.storage[0] * point.dx +
-          transform.storage[4] * point.dy +
-          transform.storage[12],
-      transform.storage[1] * point.dx +
-          transform.storage[5] * point.dy +
-          transform.storage[13],
+class _AffineMatrix {
+  _AffineMatrix() : _abde = Float32x4(1, 0, 0, 1);
+
+  late Float32x4 _abde;
+
+  bool _isIdentity = true;
+
+  double get a => _abde.x;
+  double get b => _abde.y;
+  // double get c => 0;
+  double get d => _abde.z;
+  double get e => _abde.w;
+  // double get f => 0;
+
+  void reset() {
+    _abde = Float32x4(1, 0, 0, 1);
+    _isIdentity = true;
+  }
+
+  void rotate(double angle) {
+    if (angle == 0) {
+      return;
+    }
+    final double cosAngle = math.cos(angle);
+    final double sinAngle = math.sin(angle);
+    _abde = _abde * Float32x4(cosAngle, -sinAngle, sinAngle, cosAngle);
+    _isIdentity = false;
+  }
+
+  void scale(Float64x2 xy) {
+    if (xy == Float64x2.splat(1)) {
+      return;
+    }
+    _abde = _abde * Float32x4(xy.x, 1, 1, xy.y);
+    _isIdentity = false;
+  }
+
+  Float64x2 mapPoint(Float64x2 point) {
+    if (_isIdentity) {
+      return point;
+    }
+    return Float64x2(
+      a * point.x + b * point.y,
+      d * point.x + e * point.y,
     );
+  }
+
+  @override
+  String toString() {
+    return '''
+[ $a, $b, 0.0 ]
+[ $d, $e, 0.0 ]
+[ 0.0, 0.0, 1.0 ]
+''';
   }
 }
